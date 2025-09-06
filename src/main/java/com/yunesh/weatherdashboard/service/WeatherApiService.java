@@ -3,7 +3,9 @@ package com.yunesh.weatherdashboard.service;
 import com.yunesh.weatherdashboard.dto.DailyForecast;
 import com.yunesh.weatherdashboard.dto.ForecastApiResponse;
 import com.yunesh.weatherdashboard.dto.WeatherApiResponse;
+import com.yunesh.weatherdashboard.model.History;
 import com.yunesh.weatherdashboard.model.WeatherData;
+import com.yunesh.weatherdashboard.repository.HistoryRepository;
 import com.yunesh.weatherdashboard.repository.WeatherDataRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,6 +24,7 @@ import java.util.stream.Collectors;
 public class WeatherApiService {
 
     private final WeatherDataRepository weatherDataRepository;
+    private final HistoryRepository historyRepository;
     private final RestTemplate restTemplate = new RestTemplate();
 
     @Value("${weather.api.key}")
@@ -30,10 +33,10 @@ public class WeatherApiService {
     @Value("${weather.api.url}")
     private String apiUrl;
 
-    @Value( "${weather.api.forecast.url}")
+    @Value("${weather.api.forecast.url}")
     private String forecastUrl;
 
-    // Current weather (cache 5 minutes)
+    // ✅ Current weather (cache 5 minutes and store history)
     @Cacheable(value = "currentWeather", key = "#city", unless = "#result == null")
     public WeatherData fetchAndSaveWeather(String city) {
         String url = String.format("%s?q=%s&appid=%s&units=metric", apiUrl, city, apiKey);
@@ -58,14 +61,29 @@ public class WeatherApiService {
                     .timestamp(Instant.now())
                     .build();
 
-            return weatherDataRepository.save(weatherData);
+            // Save to the current weather collection
+            weatherDataRepository.save(weatherData);
+
+            // ✅ Also save to a history collection
+            History history = History.builder()
+                    .location(weatherData.getLocation())
+                    .temperature(weatherData.getTemperature())
+                    .humidity(weatherData.getHumidity())
+                    .windSpeed(weatherData.getWindSpeed())
+                    .description(weatherData.getDescription())
+                    .recordedAt(Instant.now())
+                    .build();
+
+            historyRepository.save(history);
+
+            return weatherData;
 
         } catch (Exception e) {
             throw new RuntimeException("❌ Failed to fetch current weather for " + city + ": " + e.getMessage(), e);
         }
     }
 
-    // Forecast (cache 30 minutes)
+    // ✅ Forecast (cache 30 minutes, aggregated daily)
     @Cacheable(value = "forecastWeather", key = "#city + '-' + #days", unless = "#result == null")
     public List<DailyForecast> fetchForecast(String city, int days) {
         String url = String.format("%s?q=%s&appid=%s&units=metric", forecastUrl, city, apiKey);
