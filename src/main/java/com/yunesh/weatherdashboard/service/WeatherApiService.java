@@ -3,8 +3,10 @@ package com.yunesh.weatherdashboard.service;
 import com.yunesh.weatherdashboard.dto.DailyForecast;
 import com.yunesh.weatherdashboard.dto.ForecastApiResponse;
 import com.yunesh.weatherdashboard.dto.WeatherApiResponse;
+import com.yunesh.weatherdashboard.model.Alert;
 import com.yunesh.weatherdashboard.model.History;
 import com.yunesh.weatherdashboard.model.WeatherData;
+import com.yunesh.weatherdashboard.repository.AlertRepository;
 import com.yunesh.weatherdashboard.repository.HistoryRepository;
 import com.yunesh.weatherdashboard.repository.WeatherDataRepository;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +27,7 @@ public class WeatherApiService {
 
     private final WeatherDataRepository weatherDataRepository;
     private final HistoryRepository historyRepository;
+    private final AlertRepository alertRepository;
     private final RestTemplate restTemplate = new RestTemplate();
 
     @Value("${weather.api.key}")
@@ -36,7 +39,7 @@ public class WeatherApiService {
     @Value("${weather.api.forecast.url}")
     private String forecastUrl;
 
-    // ✅ Current weather (cache 5 minutes and store history)
+    // ✅ Current weather (cache 5 minutes and store history + alerts)
     @Cacheable(value = "currentWeather", key = "#city", unless = "#result == null")
     public WeatherData fetchAndSaveWeather(String city) {
         String url = String.format("%s?q=%s&appid=%s&units=metric", apiUrl, city, apiKey);
@@ -55,16 +58,16 @@ public class WeatherApiService {
                     .windSpeed(response.getWind().getSpeed())
                     .description(
                             (response.getWeather() != null && !response.getWeather().isEmpty())
-                                    ? response.getWeather().getFirst().getDescription()
+                                    ? response.getWeather().get(0).getDescription() // ✅ fixed
                                     : "N/A"
                     )
                     .timestamp(Instant.now())
                     .build();
 
-            // Save to the current weather collection
+            // Save current snapshot
             weatherDataRepository.save(weatherData);
 
-            // ✅ Also save to a history collection
+            // Save to history
             History history = History.builder()
                     .location(weatherData.getLocation())
                     .temperature(weatherData.getTemperature())
@@ -75,6 +78,9 @@ public class WeatherApiService {
                     .build();
 
             historyRepository.save(history);
+
+            // ✅ Check alerts
+            checkAndGenerateAlerts(weatherData);
 
             return weatherData;
 
@@ -101,7 +107,7 @@ public class WeatherApiService {
                             LinkedHashMap::new, Collectors.toList())); // preserve order
 
             return groupedByDate.entrySet().stream()
-                    .limit(days) // only required a number of days
+                    .limit(days)
                     .map(entry -> {
                         String date = entry.getKey();
                         List<ForecastApiResponse.ForecastItem> items = entry.getValue();
@@ -122,10 +128,10 @@ public class WeatherApiService {
                                 .mapToDouble(i -> i.getWind().getSpeed())
                                 .average().orElse(Double.NaN);
 
-                        // Pick the most frequent description
+                        // Pick most frequent description
                         String description = items.stream()
                                 .filter(i -> i.getWeather() != null && !i.getWeather().isEmpty())
-                                .collect(Collectors.groupingBy(i -> i.getWeather().getFirst().getDescription(),
+                                .collect(Collectors.groupingBy(i -> i.getWeather().get(0).getDescription(),
                                         Collectors.counting()))
                                 .entrySet().stream()
                                 .max(Map.Entry.comparingByValue())
@@ -146,5 +152,46 @@ public class WeatherApiService {
         } catch (Exception e) {
             throw new RuntimeException("❌ Failed to fetch forecast for " + city + ": " + e.getMessage(), e);
         }
+    }
+
+    // ✅ Alert Rules
+    private void checkAndGenerateAlerts(WeatherData currentData) {
+        String desc = currentData.getDescription().toLowerCase();
+
+        // Rule 1: Severe conditions
+        if (desc.contains("storm") || desc.contains("heavy rain") ||
+                desc.contains("flood") || desc.contains("heatwave") ||
+                desc.contains("snow") || currentData.getWindSpeed() > 20.0) {
+
+            Alert alert = Alert.builder()
+                    .location(currentData.getLocation())
+                    .type("Severe Weather")
+                    .message("Severe condition detected: " + desc)
+                    .severity("High")
+                    .issuedAt(Instant.now())
+                    .build();
+
+            alertRepository.save(alert);
+        }
+
+        // Rule 2: Sudden temperature spike in last 3 hours
+        historyRepository.findByLocationAndRecordedAtBetween(
+                currentData.getLocation(),
+                Instant.now().minusSeconds(3 * 3600),
+                Instant.now()
+        ).stream().findFirst().ifPresent(last -> {
+            double diff = Math.abs(currentData.getTemperature() - last.getTemperature());
+            if (diff > 5.0) {
+                Alert alert = Alert.builder()
+                        .location(currentData.getLocation())
+                        .type("Temperature Spike")
+                        .message("Temperature changed by " + diff + "°C in last 3 hours")
+                        .severity("Medium")
+                        .issuedAt(Instant.now())
+                        .build();
+
+                alertRepository.save(alert);
+            }
+        });
     }
 }
