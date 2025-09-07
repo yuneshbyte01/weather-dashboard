@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -138,8 +139,9 @@ public class WeatherApiService {
                                 .map(Map.Entry::getKey)
                                 .orElse("N/A");
 
+                        LocalDate parsedDate = LocalDate.parse(entry.getKey()); // key is "2025-09-07"
                         return DailyForecast.builder()
-                                .date(date)
+                                .date(parsedDate)
                                 .minTemp(minTemp)
                                 .maxTemp(maxTemp)
                                 .humidity(avgHumidity)

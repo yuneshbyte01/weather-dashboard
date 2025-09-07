@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weather Dashboard</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+<div class="container">
+    <!-- Search Bar -->
+    <div class="search-container">
+        <form method="get" action="/" class="search-form">
+            <div class="search-wrapper">
+                <input
+                        type="text"
+                        class="search-input"
+                        placeholder="Search location..."
+                        th:value="${city}"
+                        name="city"
+                        id="city-input"
+                        aria-label="Search for a city"
+                >
+                <button type="submit" class="search-button" aria-label="Search">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"
+                         viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                         stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                </button>
+            </div>
+            <button type="button" class="location-button" id="current-location" aria-label="Use current location">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"
+                     viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                    <circle cx="12" cy="10" r="3"></circle>
+                </svg>
+            </button>
+        </form>
+    </div>
+
+    <!-- Current Weather -->
+    <div class="card weather-card" th:if="${weather}">
+        <div class="weather-main">
+            <h2 class="weather-temp" th:text="${weather.temperature} + '°C'">--°C</h2>
+            <p class="weather-condition" th:text="${weather.description}">--</p>
+            <div class="weather-location">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"
+                     viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                    <circle cx="12" cy="10" r="3"></circle>
+                </svg>
+                <span th:text="${city}">Location</span>
+            </div>
+        </div>
+
+        <div class="weather-details">
+            <div class="detail-item">
+                <div class="detail-value" th:text="${weather.humidity} + '%'">--%</div>
+                <div class="detail-label">Humidity</div>
+            </div>
+            <div class="detail-item">
+                <div class="detail-value" th:text="${weather.windSpeed} + ' m/s'">-- m/s</div>
+                <div class="detail-label">Wind Speed</div>
+            </div>
+            <div class="detail-item">
+                <div class="detail-value">-- hPa</div>
+                <div class="detail-label">Pressure</div>
+            </div>
+            <div class="detail-item">
+                <div class="detail-value">--%</div>
+                <div class="detail-label">Clouds</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 5-Day Forecast -->
+    <div class="forecast-container" th:if="${forecasts}">
+        <h3 class="forecast-title">5-Day Forecast</h3>
+        <div class="forecast-cards">
+            <div th:each="f : ${forecasts}" class="forecast-card">
+                <!--/*@thymesVar id="create" type=""*/-->
+                <!--/*@thymesVar id="create" type=""*/-->
+                <div class="forecast-day"
+                     th:text="${#temporals.dayOfWeekName(f.date)}">Day</div>
+                <div class="forecast-icon"
+                     th:with="icon=${#strings.toLowerCase(f.description)},
+                        weatherIcon=${icon.contains('rain') ? '🌧️' 
+                        : (icon.contains('cloud') ? '☁️' 
+                        : (icon.contains('sun') ? '☀️' 
+                        : (icon.contains('snow') ? '❄️' : '🌤️')))}"
+                     th:text="${weatherIcon}">
+                </div>
+
+                <div class="forecast-temp">
+                    <span th:text="${f.minTemp}">--</span>°C /
+                    <strong th:text="${f.maxTemp}">--</strong>°C
+                </div>
+                <div class="forecast-condition" th:text="${f.description}">--</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Weather Alerts -->
+    <div class="alerts-container" th:if="${alerts}">
+        <h3 class="alerts-title">Weather Alerts</h3>
+
+        <!-- No alerts -->
+        <div th:if="${#lists.isEmpty(alerts)}">
+            <p>No recent alerts 🚀</p>
+        </div>
+
+        <!-- Alerts list -->
+        <div th:each="a : ${alerts}" class="alert-card">
+            <h4 th:text="${a.type}">Alert Type</h4>
+            <p th:text="${a.message}">Alert message goes here</p>
+            <p>Severity: <span th:text="${a.severity}">Medium</span></p>
+            <p th:text="${#temporals.format(a.issuedAt, 'yyyy-MM-dd HH:mm')}">Date</p>
+        </div>
+    </div>
+</div>
+
+<!-- Scripts -->
+<script src="/js/ui.js"></script>
+<script src="/js/script.js"></script>
+</body>
+</html>
