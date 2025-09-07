@@ -30,6 +30,12 @@ public class WeatherData {
     @NotNull
     private Double windSpeed;
 
+    private Double feelsLike;
+    private Double pressure;
+
+    private Instant sunrise;
+    private Instant sunset;
+
     private String description; // e.g., sunny, cloudy
 
     private Instant timestamp;

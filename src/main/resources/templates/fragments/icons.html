@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="">
+<head>
+    <meta charset="UTF-8">
+    <title>Weather Icons Fragment</title>
+</head>
+<body>
+
+<!-- Weather Icon Fragment -->
+<div th:fragment="weatherIcon(desc)">
+    <i class="fa-solid fa-cloud-rain"
+       th:if="${#strings.containsIgnoreCase(desc, 'rain')}"></i>
+    <i class="fa-solid fa-cloud"
+       th:if="${#strings.containsIgnoreCase(desc, 'cloud')}"></i>
+    <i class="fa-solid fa-snowflake"
+       th:if="${#strings.containsIgnoreCase(desc, 'snow')}"></i>
+    <i class="fa-solid fa-sun"
+       th:if="${#strings.containsIgnoreCase(desc, 'sun')}"></i>
+    <i class="fa-solid fa-cloud-sun"
+       th:if="${!(#strings.containsIgnoreCase(desc, 'rain')
+                or #strings.containsIgnoreCase(desc, 'cloud')
+                or #strings.containsIgnoreCase(desc, 'snow')
+                or #strings.containsIgnoreCase(desc, 'sun'))}"></i>
+</div>
+
+</body>
+</html>

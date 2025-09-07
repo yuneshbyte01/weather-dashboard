@@ -16,12 +16,13 @@ document.addEventListener('DOMContentLoaded', () => {
     form.setAttribute('aria-busy', busy ? 'true' : 'false');
     submitBtn.disabled = !!busy;
     if (busy) {
-      submitBtn.dataset.label = submitBtn.textContent;
+      submitBtn.dataset.label = submitBtn.textContent.trim();
       submitBtn.textContent = 'Searching…';
     } else {
       submitBtn.textContent = submitBtn.dataset.label || 'Search';
     }
     status.textContent = message;
+    status.className = `subtle mt-2 ${busy ? 'status-success' : ''}`;
   };
 
   form.addEventListener('submit', (e) => {
@@ -29,6 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!value) {
       e.preventDefault();
       status.textContent = 'Please enter a city name.';
+      status.className = 'subtle mt-2 status-error';
       input.focus();
 
       // Shake animation

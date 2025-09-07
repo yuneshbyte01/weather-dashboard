@@ -15,10 +15,14 @@ public class CacheConfig {
 
     @Bean
     public CacheManager cacheManager() {
-        CaffeineCacheManager cacheManager = new CaffeineCacheManager("currentWeather", "forecastWeather");
+        CaffeineCacheManager cacheManager =
+                new CaffeineCacheManager("currentWeather", "forecastWeather", "hourlyWeather");
+
         cacheManager.setCaffeine(Caffeine.newBuilder()
-                .expireAfterWrite(30, TimeUnit.MINUTES) // default
+                .expireAfterWrite(30, TimeUnit.MINUTES) // default for all caches
         );
+
         return cacheManager;
     }
 }
+

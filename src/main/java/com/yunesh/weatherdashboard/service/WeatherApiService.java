@@ -2,6 +2,7 @@ package com.yunesh.weatherdashboard.service;
 
 import com.yunesh.weatherdashboard.dto.DailyForecast;
 import com.yunesh.weatherdashboard.dto.ForecastApiResponse;
+import com.yunesh.weatherdashboard.dto.HourlyForecast;
 import com.yunesh.weatherdashboard.dto.WeatherApiResponse;
 import com.yunesh.weatherdashboard.model.Alert;
 import com.yunesh.weatherdashboard.model.History;
@@ -17,6 +18,9 @@ import org.springframework.web.client.RestTemplate;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,7 +44,7 @@ public class WeatherApiService {
     @Value("${weather.api.forecast.url}")
     private String forecastUrl;
 
-    // ✅ Current weather (cache 5 minutes and store history + alerts)
+    // ✅ Current weather
     @Cacheable(value = "currentWeather", key = "#city", unless = "#result == null")
     public WeatherData fetchAndSaveWeather(String city) {
         String url = String.format("%s?q=%s&appid=%s&units=metric", apiUrl, city, apiKey);
@@ -55,20 +59,23 @@ public class WeatherApiService {
             WeatherData weatherData = WeatherData.builder()
                     .location(response.getName())
                     .temperature(response.getMain().getTemp())
+                    .feelsLike(response.getMain().getFeels_like())
+                    .pressure(response.getMain().getPressure())
                     .humidity(response.getMain().getHumidity())
                     .windSpeed(response.getWind().getSpeed())
                     .description(
                             (response.getWeather() != null && !response.getWeather().isEmpty())
-                                    ? response.getWeather().get(0).getDescription() // ✅ fixed
+                                    ? response.getWeather().getFirst().getDescription()
                                     : "N/A"
                     )
+                    .sunrise(Instant.ofEpochSecond(response.getSys().getSunrise()).atZone(ZoneOffset.UTC).toInstant())
+                    .sunset(Instant.ofEpochSecond(response.getSys().getSunset()).atZone(ZoneOffset.UTC).toInstant())
                     .timestamp(Instant.now())
                     .build();
 
-            // Save current snapshot
             weatherDataRepository.save(weatherData);
 
-            // Save to history
+            // Save to history (keep it minimal)
             History history = History.builder()
                     .location(weatherData.getLocation())
                     .temperature(weatherData.getTemperature())
@@ -80,7 +87,6 @@ public class WeatherApiService {
 
             historyRepository.save(history);
 
-            // ✅ Check alerts
             checkAndGenerateAlerts(weatherData);
 
             return weatherData;
@@ -90,7 +96,7 @@ public class WeatherApiService {
         }
     }
 
-    // ✅ Forecast (cache 30 minutes, aggregated daily)
+    // ✅ Daily Forecast (5-day)
     @Cacheable(value = "forecastWeather", key = "#city + '-' + #days", unless = "#result == null")
     public List<DailyForecast> fetchForecast(String city, int days) {
         String url = String.format("%s?q=%s&appid=%s&units=metric", forecastUrl, city, apiKey);
@@ -102,10 +108,9 @@ public class WeatherApiService {
                 throw new RuntimeException("No forecast data from Weather API");
             }
 
-            // Group by date (yyyy-MM-dd)
             Map<String, List<ForecastApiResponse.ForecastItem>> groupedByDate = response.getList().stream()
                     .collect(Collectors.groupingBy(item -> item.getDt_txt().split(" ")[0],
-                            LinkedHashMap::new, Collectors.toList())); // preserve order
+                            LinkedHashMap::new, Collectors.toList()));
 
             return groupedByDate.entrySet().stream()
                     .limit(days)
@@ -113,33 +118,21 @@ public class WeatherApiService {
                         String date = entry.getKey();
                         List<ForecastApiResponse.ForecastItem> items = entry.getValue();
 
-                        double minTemp = items.stream()
-                                .mapToDouble(i -> i.getMain().getTemp_min())
-                                .min().orElse(Double.NaN);
+                        double minTemp = items.stream().mapToDouble(i -> i.getMain().getTemp_min()).min().orElse(Double.NaN);
+                        double maxTemp = items.stream().mapToDouble(i -> i.getMain().getTemp_max()).max().orElse(Double.NaN);
+                        double avgHumidity = items.stream().mapToDouble(i -> i.getMain().getHumidity()).average().orElse(Double.NaN);
+                        double avgWindSpeed = items.stream().mapToDouble(i -> i.getWind().getSpeed()).average().orElse(Double.NaN);
 
-                        double maxTemp = items.stream()
-                                .mapToDouble(i -> i.getMain().getTemp_max())
-                                .max().orElse(Double.NaN);
-
-                        double avgHumidity = items.stream()
-                                .mapToDouble(i -> i.getMain().getHumidity())
-                                .average().orElse(Double.NaN);
-
-                        double avgWindSpeed = items.stream()
-                                .mapToDouble(i -> i.getWind().getSpeed())
-                                .average().orElse(Double.NaN);
-
-                        // Pick most frequent description
                         String description = items.stream()
                                 .filter(i -> i.getWeather() != null && !i.getWeather().isEmpty())
-                                .collect(Collectors.groupingBy(i -> i.getWeather().get(0).getDescription(),
-                                        Collectors.counting()))
+                                .collect(Collectors.groupingBy(i -> i.getWeather().getFirst().getDescription(), Collectors.counting()))
                                 .entrySet().stream()
                                 .max(Map.Entry.comparingByValue())
                                 .map(Map.Entry::getKey)
                                 .orElse("N/A");
 
-                        LocalDate parsedDate = LocalDate.parse(entry.getKey()); // key is "2025-09-07"
+                        LocalDate parsedDate = LocalDate.parse(date);
+
                         return DailyForecast.builder()
                                 .date(parsedDate)
                                 .minTemp(minTemp)
@@ -156,11 +149,41 @@ public class WeatherApiService {
         }
     }
 
-    // ✅ Alert Rules
+    // ✅ Hourly Forecast (next X hours)
+    @Cacheable(value = "hourlyWeather", key = "#city + '-' + #hours", unless = "#result == null")
+    public List<HourlyForecast> fetchHourlyForecast(String city, int hours) {
+        String url = String.format("%s?q=%s&appid=%s&units=metric", forecastUrl, city, apiKey);
+
+        try {
+            ForecastApiResponse response = restTemplate.getForObject(url, ForecastApiResponse.class);
+
+            if (response == null || response.getList() == null) {
+                throw new RuntimeException("No hourly forecast data from Weather API");
+            }
+
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+            return response.getList().stream()
+                    .limit((int) Math.ceil((double) hours / 3)) // OWM = 3h steps
+                    .map(item -> HourlyForecast.builder()
+                            .time(LocalDateTime.parse(item.getDt_txt(), formatter))
+                            .minTemp(item.getMain().getTemp_min())
+                            .maxTemp(item.getMain().getTemp_max())
+                            .humidity(item.getMain().getHumidity())
+                            .windSpeed(item.getWind().getSpeed())
+                            .description(item.getWeather().getFirst().getDescription())
+                            .build())
+                    .collect(Collectors.toList());
+
+        } catch (Exception e) {
+            throw new RuntimeException("❌ Failed to fetch hourly forecast for " + city + ": " + e.getMessage(), e);
+        }
+    }
+
+    // ✅ Alerts
     private void checkAndGenerateAlerts(WeatherData currentData) {
         String desc = currentData.getDescription().toLowerCase();
 
-        // Rule 1: Severe conditions
         if (desc.contains("storm") || desc.contains("heavy rain") ||
                 desc.contains("flood") || desc.contains("heatwave") ||
                 desc.contains("snow") || currentData.getWindSpeed() > 20.0) {
@@ -176,7 +199,6 @@ public class WeatherApiService {
             alertRepository.save(alert);
         }
 
-        // Rule 2: Sudden temperature spike in last 3 hours
         historyRepository.findByLocationAndRecordedAtBetween(
                 currentData.getLocation(),
                 Instant.now().minusSeconds(3 * 3600),
